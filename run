@@ -3,9 +3,10 @@
 use Modern::Perl;
 
 use HTTP::Server::Simple;
+use JSON;
 use Readonly;
 
-Readonly my $DEFAULT_PORT = '8080';
+Readonly my $DEFAULT_PORT => '8080';
 
 
 
@@ -49,7 +50,10 @@ sub handle_request {
         $params{ $key } = $cgi->param( $key );
     }
     if ( 'POST' eq $method ) {
-        my $debug = Dumper \%params;
+	my $payload = from_json( $params{'payload'} );
+	my $debug   = Dumper $payload;
+        # my $debug = Dumper \%params;
+
         main::debug( $debug );
     }
     
