@@ -50,7 +50,7 @@ sub handle_request {
         $params{ $key } = $cgi->param( $key );
     }
     if ( 'POST' eq $method ) {
-	my $payload = from_json( $params{'payload'} );
+	my $payload = decode_json( $params{'payload'} );
 	my $debug   = Dumper $payload;
         # my $debug = Dumper \%params;
 
