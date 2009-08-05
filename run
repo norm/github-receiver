@@ -1,0 +1,61 @@
+#!/ports/bin/perl
+
+use Modern::Perl;
+
+use HTTP::Server::Simple;
+use Readonly;
+
+Readonly my $DEFAULT_PORT = '8080';
+
+
+
+my $port = $DEFAULT_PORT;
+
+# save stdout for debugging
+my $stdout;
+open $stdout, ">-"
+    or die "Cannot duplicate stdout: $!";
+
+my $server = HTTP::Server::GithubReceive->new( $port );
+$server->run();
+exit;
+
+
+
+sub debug {
+    my $text = shift;
+    
+    say {$stdout} "->  $text";
+}
+
+
+
+package HTTP::Server::GithubReceive;
+
+use base qw( HTTP::Server::Simple::CGI );
+use Data::Dumper;
+
+sub handle_request {
+    my $self = shift;
+    my $cgi  = shift;
+    
+    my $path   = $cgi->path_info();
+    my $method = $cgi->request_method();
+    my @keys   = $cgi->param();
+    my %params;
+    
+    main::debug( "${method} ${path}" );
+    foreach my $key ( @keys ) {
+        $params{ $key } = $cgi->param( $key );
+    }
+    if ( 'POST' eq $method ) {
+        my $debug = Dumper \%params;
+        main::debug( $debug );
+    }
+    
+    print "HTTP/1.1 200 OK\r\n";
+    print "Content-Type: text/plain\r\n\r\n";
+    print "Word up.\n";
+}
+
+1;
