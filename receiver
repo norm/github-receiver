@@ -7,35 +7,6 @@ use Getopt::Std;
 use Pod::Usage;
 
 our $stdout;
-our $http_200 = <<HTTP;
-HTTP/1.1 200 OK\r
-Content-Type: text/html; charset=UTF-8\r
-\r
-HTTP
-our $http_404 = <<HTTP;
-HTTP/1.1 404 Not Found\r
-Content-Type: text/html; charset=UTF-8\r
-\r
-HTTP
-our $html_intro = <<HTML;
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Github post-receive web hook handler</title>
-</head>
-<body>
-    <h1>Github post-receive web hook handler</h1>
-    <pre>
-HTML
-our $html_outtro = <<HTML;
-    </pre>
-    <p>Read more <a href='http://github.com/norm/github-receiver'>about 
-      this software on github</a>.</p>
-</body>
-</html>
-HTML
-
-
 
 # get command line options for the runserver
 my %option = (
@@ -66,8 +37,8 @@ if ( $option{'s'} ) {
 else {
     my $cgi = CGI->new();
     $stdout = FileHandle->new( '/tmp/receiver.log', 'a' );
-    
-    Github::Receive::update_repository( $cgi );
+
+    Github::Receive::process_request( $cgi );
 }
 exit;
 
@@ -86,8 +57,37 @@ sub debug {
     
     use JSON;
     
-    my %config;
-    
+    my ( %config, $http_200, $http_404, $html_intro, $html_outtro );
+    BEGIN {
+        $http_200 = <<HTTP;
+HTTP/1.1 200 OK\r
+Content-Type: text/html; charset=UTF-8\r
+\r
+HTTP
+        $http_404 = <<HTTP;
+HTTP/1.1 404 Not Found\r
+Content-Type: text/html; charset=UTF-8\r
+\r
+HTTP
+        $html_intro = <<HTML;
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Github post-receive web hook handler</title>
+</head>
+<body>
+    <h1>Github post-receive web hook handler</h1>
+    <pre>
+HTML
+        $html_outtro = <<HTML;
+    </pre>
+    <p>Read more <a href='http://github.com/norm/github-receiver'>about 
+      this software on github</a>.</p>
+</body>
+</html>
+HTML
+    }
+
     sub read_config {
         my $file = shift;
         
@@ -123,35 +123,76 @@ sub debug {
             }
         }
     }
-    sub update_repository {
-        my $cgi  = shift;
+    sub process_request {
+        my $cgi  = shift // CGI->new();
         
-        my $repo = which_repository( $cgi );
+        my $path   = $cgi->path_info();
+        my $method = $cgi->request_method();
+        main::debug( "${method} ${path}" );
+        
+        if ( 'POST' eq $method ) {
+            process_post( $cgi );
+        }
+        else {
+            process_get( $cgi );;
+        }
+    }
+    sub process_post {
+        my $cgi = shift;
+        
+        my $repo   = which_repository( $cgi );
         my $config = $config{ $repo };
-        
-        print $main::html_intro;
+        main::debug( "update repo $repo" );
         
         if ( defined $config ) {
-            main::debug( $repo );
+            print $http_200 
+                . $html_intro;
             
-            DIR:
-            foreach my $directory ( @{ $config{'directory'} } ) {
-                chdir( $config{'directory'} )
-                    or next DIR;
-                system( 'git pull origin master' )
-                    or next DIR;
-                main::debug( "updated ${config{'directory'}}" );
-            }
-            
-            COMMAND:
-            foreach my $command ( @{ $config{'command'} } ) {
-                system( $command ) 
-                    or next COMMAND;
-                main::debug( "ran $command" );
-            }
+            update_repository( $config );
+        }
+        else {
+            main::debug( "error finding config for $repo" );
+            print $http_404 
+                . $html_intro;
         }
         
-        print $main::html_outtro;
+        print $html_outtro;
+    }
+    sub process_get {
+        my $cgi = shift;
+        
+        my $path   = $cgi->path_info();
+        my $method = $cgi->request_method();
+        main::debug( "${method} ${path}" );
+        
+        my $get_on_homepage = ( 'GET' eq $method )
+                           && ( '/'   eq $path   );
+        my $header = $get_on_homepage
+                         ? $http_200
+                         : $http_404;
+        
+        print $header
+            . $html_intro
+            . $html_outtro;
+    }
+    sub update_repository {
+        my $config = shift;
+        
+        DIR:
+        foreach my $directory ( @{ $config->{'directory'} } ) {
+            chdir( $directory )
+                or next DIR;
+            system( 'git pull origin master' )
+                or next DIR;
+            main::debug( "updated $directory" );
+        }
+
+        COMMAND:
+        foreach my $command ( @{ $config->{'command'} } ) {
+            system( $command ) 
+                or next COMMAND;
+            main::debug( "ran $command" );
+        }
     }
     sub which_repository {
         my $cgi = shift;
@@ -168,8 +209,8 @@ sub debug {
             my $payload = decode_json( $params{'payload'} );
             
             $repo = sprintf '%s/%s',
-                        $payload->{'user'},
-                        $payload->{'repository'};
+                        $payload->{'repository'}{'owner'}{'name'},
+                        $payload->{'repository'}{'name'};
         }
         
         return $repo;
@@ -181,29 +222,12 @@ sub debug {
     package HTTP::Server::Github::Receive;
 
     use base qw( HTTP::Server::Simple::CGI );
-    use Data::Dumper;
 
     sub handle_request {
         my $self = shift;
         my $cgi  = shift;
     
-        my $path   = $cgi->path_info();
-        my $method = $cgi->request_method();
-    
-        main::debug( "${method} ${path}" );
-        if ( 'POST' eq $method ) {
-            Github::Receive::update_repository( $cgi );
-        }
-        else {
-            if ( 'GET' eq $method  and  '/' eq $path ) {
-                print $http_200;
-            }
-            else {
-                print $http_404;
-            }
-            print ${main::html_intro}
-                . ${main::html_outtro};
-        }
+        Github::Receive::process_request( $cgi );
     }
 
     1;
