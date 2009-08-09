@@ -157,6 +157,7 @@ HTML
         }
         
         print $html_outtro;
+        main::debug( "done" );
     }
     sub process_get {
         my $cgi = shift;
@@ -180,26 +181,32 @@ HTML
         
         DIR:
         foreach my $directory ( @{ $config->{'directory'} } ) {
-            chdir( $directory )
-                or next DIR;
-            
+            main::debug( "updating $directory" );
+
+            chdir( $directory );
             my $pull = FileHandle->new( 'git pull origin master |' );
             if ( defined $pull ) {
-                main::debug( "updating $directory" );
                 while ( my $line = <$pull> ) {
-                    main::debug( $line );
+                    main::debug( chomp $line );
                 }
             }
+            else {
+                main::debug( "error running git pull: $!" );
+            }
         }
-
+        
         COMMAND:
         foreach my $command ( @{ $config->{'command'} } ) {
+            main::debug( "running $command" );
+            
             my $pull = FileHandle->new( "$command |" );
             if ( defined $pull ) {
-                main::debug( "running $command" );
                 while ( my $line = <$pull> ) {
-                    main::debug( $line );
+                    main::debug( chomp $line );
                 }
+            }
+            else {
+                main::debug( "error running command: $!" );
             }
         }
     }
