@@ -182,16 +182,25 @@ HTML
         foreach my $directory ( @{ $config->{'directory'} } ) {
             chdir( $directory )
                 or next DIR;
-            system( 'git pull origin master' )
-                or next DIR;
-            main::debug( "updated $directory" );
+            
+            my $pull = FileHandle->new( 'git pull origin master |' );
+            if ( defined $pull ) {
+                main::debug( "updating $directory" );
+                while ( my $line = <$pull> ) {
+                    main::debug( $line );
+                }
+            }
         }
 
         COMMAND:
         foreach my $command ( @{ $config->{'command'} } ) {
-            system( $command ) 
-                or next COMMAND;
-            main::debug( "ran $command" );
+            my $pull = FileHandle->new( "$command |" );
+            if ( defined $pull ) {
+                main::debug( "running $command" );
+                while ( my $line = <$pull> ) {
+                    main::debug( $line );
+                }
+            }
         }
     }
     sub which_repository {
