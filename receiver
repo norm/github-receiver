@@ -132,6 +132,7 @@ sub debug {
         print $main::html_intro;
         
         if ( defined $config ) {
+            main::debug( $repo );
             
             DIR:
             foreach my $directory ( @{ $config{'directory'} } ) {
@@ -139,12 +140,14 @@ sub debug {
                     or next DIR;
                 system( 'git pull origin master' )
                     or next DIR;
+                main::debug( "updated ${config{'directory'}}" );
             }
             
             COMMAND:
             foreach my $command ( @{ $config{'command'} } ) {
                 system( $command ) 
                     or next COMMAND;
+                main::debug( "ran $command" );
             }
         }
         
