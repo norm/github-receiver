@@ -1,4 +1,4 @@
-#!/ports/bin/perl
+#!/usr/bin/env perl
 
 use Modern::Perl;
 
