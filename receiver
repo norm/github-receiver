@@ -184,7 +184,8 @@ HTML
             my $pull = FileHandle->new( 'git pull origin master |' );
             if ( defined $pull ) {
                 while ( my $line = <$pull> ) {
-                    main::debug( chomp $line );
+                    chomp $line;
+                    main::debug( $line );
                 }
             }
             else {
@@ -199,7 +200,8 @@ HTML
             my $pull = FileHandle->new( "$command |" );
             if ( defined $pull ) {
                 while ( my $line = <$pull> ) {
-                    main::debug( chomp $line );
+                    chomp $line;
+                    main::debug( $line );
                 }
             }
             else {
