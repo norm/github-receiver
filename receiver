@@ -23,9 +23,6 @@ Github::Receive::read_config( $option{'c'} );
 
 # either run in a server mode
 if ( $option{'s'} ) {
-    # TODO - needed?
-    # use HTTP::Server::Simple;
-
     # save stdout for debugging purposes
     open $stdout, ">-"
         or die "Cannot duplicate stdout: $!";
