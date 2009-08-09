@@ -274,7 +274,7 @@ Each section is started by putting the repository name in square brackets.
 =item directories
 
 Each repository can have multiple locations where the repository is checked
-out. The script will execute a C<git pull remote origin> command in each
+out. The script will execute a C<git pull origin master> command in each
 directory.
 
 =item commands
