@@ -286,10 +286,9 @@ Run receiver in a CGI environment. An example configuration for lighttpd
 is:
 
     $HTTP["host"] == "example.com" {
-        server.document-root = "/var/www/github-receive"
-        url.rewrite-once = (
-            "^/.*$" => "/receiver.cgi"
-        )
+        server.document-root   = "/var/www/github-receive"
+        setenv.add-environment = ( "PATH"  => "/usr/bin:/bin" )
+        url.rewrite-once       = ( "^/.*$" => "/receiver.cgi" )
     }
 
 It expects the config file to be C<receiver.conf>, in the same directory
