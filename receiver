@@ -2,22 +2,73 @@
 
 use Modern::Perl;
 
-use HTTP::Server::Simple;
-use Readonly;
+use CGI;
+use Getopt::Std;
+use Pod::Usage;
 
-Readonly my $DEFAULT_PORT => '8080';
+our $stdout;
+our $http_200 = <<HTTP;
+HTTP/1.1 200 OK\r
+Content-Type: text/html; charset=UTF-8\r
+\r
+HTTP
+our $http_404 = <<HTTP;
+HTTP/1.1 404 Not Found\r
+Content-Type: text/html; charset=UTF-8\r
+\r
+HTTP
+our $html_intro = <<HTML;
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Github post-receive web hook handler</title>
+</head>
+<body>
+    <h1>Github post-receive web hook handler</h1>
+    <pre>
+HTML
+our $html_outtro = <<HTML;
+    </pre>
+    <p>Read more <a href='http://github.com/norm/github-receiver'>about 
+      this software on github</a>.</p>
+</body>
+</html>
+HTML
 
 
 
-my $port = $DEFAULT_PORT;
+# get command line options for the runserver
+my %option = (
+        'p' => 8080,                # port to run on
+        'c' => 'receiver.conf',     # config file
+    );
+my $all_valid_options = getopts( 'c:hp:s', \%option );
+if ( $option{'h'}  or  !$all_valid_options ) {
+    pod2usage(2);
+}
 
-# save stdout for debugging
-my $stdout;
-open $stdout, ">-"
-    or die "Cannot duplicate stdout: $!";
+# read the config file
+Github::Receive::read_config( $option{'c'} );
 
-my $server = HTTP::Server::GithubReceive->new( $port );
-$server->run();
+# either run in a server mode
+if ( $option{'s'} ) {
+    # TODO - needed?
+    # use HTTP::Server::Simple;
+
+    # save stdout for debugging purposes
+    open $stdout, ">-"
+        or die "Cannot duplicate stdout: $!";
+
+    my $server = HTTP::Server::Github::Receive->new( $option{'p'} );
+    $server->run();
+}
+# ...or as a cgi script
+else {
+    my $cgi = CGI->new();
+    $stdout = FileHandle->new( '/tmp/receiver.log', 'a' );
+    
+    Github::Receive::update_repository( $cgi );
+}
 exit;
 
 
@@ -30,36 +81,218 @@ sub debug {
 
 
 
-package HTTP::Server::GithubReceive;
-
-use base qw( HTTP::Server::Simple::CGI );
-use Data::Dumper;
-use JSON;
-
-sub handle_request {
-    my $self = shift;
-    my $cgi  = shift;
+{
+    package Github::Receive;
     
-    my $path   = $cgi->path_info();
-    my $method = $cgi->request_method();
-    my @keys   = $cgi->param();
-    my %params;
+    use JSON;
     
-    main::debug( "${method} ${path}" );
-    foreach my $key ( @keys ) {
-        $params{ $key } = $cgi->param( $key );
+    my %config;
+    
+    sub read_config {
+        my $file = shift;
+        
+        my $handle = FileHandle->new( $file );
+        if ( defined $handle ) {
+            my $repo;
+            
+            LINE:
+            while ( my $line = <$handle> ) {
+                # skip blank lines and comments
+                next LINE if $line =~ m{^ \s* (?: [#] .* )? $}x;
+                
+                # repository names
+                if ( $line =~ m{^ \s* \[ ( \S+ ) \] \s* $}x ) {
+                    $repo = $1;
+                    next LINE;
+                }
+                
+                if ( $repo ) {
+                    my @commands = qw( directory command );
+                    my $commands = '(' . join( '|', @commands ) . ')';
+                    my $find_commands = qr{
+                            ^ \s* $commands \s* = \s* ( .*? ) \s* $
+                        }x;
+                    if ( $line =~ $find_commands ) {
+                        push @{ $config{ $repo }{ $1 } }, $2;
+                        next LINE;
+                    }
+                }
+                
+                # anything else is an error
+                die "Error in config: $line";
+            }
+        }
     }
-    if ( 'POST' eq $method ) {
-	my $payload = decode_json( $params{'payload'} );
-	my $debug   = Dumper $payload;
-        # my $debug = Dumper \%params;
-
-        main::debug( $debug );
+    sub update_repository {
+        my $cgi  = shift;
+        
+        my $repo = which_repository( $cgi );
+        my $config = $config{ $repo };
+        
+        print $main::html_intro;
+        
+        if ( defined $config ) {
+            
+            DIR:
+            foreach my $directory ( @{ $config{'directory'} } ) {
+                chdir( $config{'directory'} )
+                    or next DIR;
+                system( 'git pull origin master' )
+                    or next DIR;
+            }
+            
+            COMMAND:
+            foreach my $command ( @{ $config{'command'} } ) {
+                system( $command ) 
+                    or next COMMAND;
+            }
+        }
+        
+        print $main::html_outtro;
+    }
+    sub which_repository {
+        my $cgi = shift;
+        my $repo;
+        
+        my $method = $cgi->request_method();
+        my @keys   = $cgi->param();
+        my %params;
+        
+        foreach my $key ( @keys ) {
+            $params{ $key } = $cgi->param( $key );
+        }
+        if ( 'POST' eq $method ) {
+            my $payload = decode_json( $params{'payload'} );
+            
+            $repo = sprintf '%s/%s',
+                        $payload->{'user'},
+                        $payload->{'repository'};
+        }
+        
+        return $repo;
     }
     
-    print "HTTP/1.1 200 OK\r\n";
-    print "Content-Type: text/plain\r\n\r\n";
-    print "Word up.\n";
+    1;
+}
+{
+    package HTTP::Server::Github::Receive;
+
+    use base qw( HTTP::Server::Simple::CGI );
+    use Data::Dumper;
+
+    sub handle_request {
+        my $self = shift;
+        my $cgi  = shift;
+    
+        my $path   = $cgi->path_info();
+        my $method = $cgi->request_method();
+    
+        main::debug( "${method} ${path}" );
+        if ( 'POST' eq $method ) {
+            Github::Receive::update_repository( $cgi );
+        }
+        else {
+            if ( 'GET' eq $method  and  '/' eq $path ) {
+                print $http_200;
+            }
+            else {
+                print $http_404;
+            }
+            print ${main::html_intro}
+                . ${main::html_outtro};
+        }
+    }
+
+    1;
 }
 
-1;
+
+
+__END__
+
+=head1 NAME
+
+B<receiver> - Github post-receive web hook handler
+
+=head1 SYNOPSIS
+
+Run receiver in one of two ways:
+
+=over 
+
+=item B<receiver> [-p <port>] [-c <config>] -s
+
+Run receiver as a standalone server. 
+
+=over 
+
+=item -p <port>
+
+Run the server on port <port>. Default is 8080.
+
+=item -c <config>
+
+Use the configuration file <config> to define the repositories. Default is
+C<receiver.conf>.
+
+=back
+
+=item B<receiver.cgi>
+
+Run receiver in a CGI environment. An example configuration for lighttpd
+is:
+
+    $HTTP["host"] == "example.com" {
+        server.document-root = "/var/www/github-receive"
+        url.rewrite-once = (
+            "^/.*$" => "/receiver.cgi"
+        )
+    }
+
+It expects the config file to be C<receiver.conf>, in the same directory
+as the CGI script.
+
+=back
+
+=head1 CONFIGURATION FILE
+
+The configuration file is in an INI-style format. 
+
+=over
+
+=item comments
+
+Lines beginning with a hash (#) are comments.
+
+=item repositories
+
+Each section is started by putting the repository name in square brackets. 
+
+=item directories
+
+Each repository can have multiple locations where the repository is checked
+out. The script will execute a C<git pull remote origin> command in each
+directory.
+
+=item commands
+
+Each repository can have multiple commands attached, each of which will be 
+run B<after> any directories have been updated.
+
+=back
+
+=head2 Example configuration file
+
+    # each repo can be checked out in multiple locations
+    [norm/homedir]
+    directory = /home/norm
+    directory = /home/skel/example
+
+    # repo updating can be handled by a command instead of this script
+    [norm/github-receiver]
+    command = /var/www/git-update norm/github-receiver
+    
+
+=head1 AUTHOR
+
+Mark Norman Francis L<http://marknormanfrancis.com/>
